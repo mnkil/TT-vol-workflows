@@ -3,6 +3,7 @@ creds.yaml
 <<<<<<< HEAD
 nav.db
 nav-test.ipynb
+._masterdata-futures.py
 
 # Folder view configuration files
 .DS_Store

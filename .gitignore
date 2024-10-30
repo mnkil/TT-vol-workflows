@@ -27,5 +27,8 @@ Thumbs.db
 venv
 node_modules
 .sass-cache
-=======
->>>>>>> 3f95b0e (init)
+.DS_Store
+._inventory.py
+._masterdata-futures.py
+._masterdata-fxfoptions.py
+._nav-tracker.py

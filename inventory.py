@@ -1,113 +1,182 @@
-# vol inventory
+# eq and fop inventory
 
-from discordwebhook import Discord
+import platform
+import sqlite3
+import pandas as pd
 import yaml
 import requests
 import json
-import platform
-import pandas as pd
 from datetime import datetime
-import sqlite3
+from discordwebhook import Discord
 
-def position_feedr():
-    ps, file = pform()
-    print(f'platform: {ps}, file: {file}')
-    creds = get_creds(file)
-    discord_url_logs = creds["discord_url_logs"]
-    pw = creds["pw"]
-    user = creds['user']
-    discord = Discord(url=discord_url_logs)
-    data = {
-        "login": user,
-        "password": pw,
-        "remember-me": True
-    }
-    response = get_auth(data)
-    session_token = get_token(response)
-    data = get_positions(session_token)
-    positions_df = pd.DataFrame(data['data']['items'])
-    end_session(session_token)
-    df_fxinventory = data_dump(positions_df)
-    discord.post(content="Inventory job done")
-    return df_fxinventory
+# --------- Authentication and Platform Functions ---------
 
-def data_dump(df):
-    ps, _ = pform()
-    if ps == "Linux":
-        inventory_db_path = "/home/ec2-user/tt/inventory.db"
-        inventory_fx_db_path = "/home/ec2-user/tt/inventory-fx.db"
-    else:
-        inventory_db_path = "inventory.db"
-        inventory_fx_db_path = "inventory-fx.db"
-
-    inventory_conn = sqlite3.connect(inventory_db_path)
-    df.to_sql('positions', inventory_conn, if_exists='replace', index=False)
-    inventory_conn.close()
-
-    df_fxinventory = df[df['symbol'].str[2] == '6']
-
-    inventory_fx_conn = sqlite3.connect(inventory_fx_db_path)
-    df_fxinventory.to_sql('fx_positions', inventory_fx_conn, if_exists='replace', index=False)
-    # df_fxinventory.to_clipboard()   
-    inventory_fx_conn.close()
-    # print(df['account-number'].head(1))
-    return df_fxinventory
-
-def end_session(session_token):
-    url = 'https://api.tastyworks.com/sessions'
-    headers = {
-        'include-marks': "True",  # Set it
-        'Authorization': session_token,
-        'Content-Type': 'application/json'
-    }
-    response = requests.delete(url, headers=headers)
-    print('Status Code:', response.status_code)
-    print('Response:', response.text)
-
-def get_positions(session_token):
-    url = 'https://api.tastyworks.com/accounts/5WY49300/positions'
-    headers = {
-        'Authorization': session_token,
-        'Content-Type': 'application/json'
-    }
-    response = requests.get(url, headers=headers)
-    print('Status Code:', response.status_code)
-    json_string = response.text
-    data = json.loads(json_string)
-    return data
-
-def get_token(response):
-    json_string = response.text
-    data = json.loads(json_string)
-    session_token = data['data']['session-token']
-    print("Session Token:", session_token)
-    return session_token
-
-def get_auth(data):
-    url = 'https://api.tastyworks.com/sessions'
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    response = requests.post(url, data=json.dumps(data), headers=headers)
-    return response
-    print(response.status_code)  # Prints the status code of the response
-    print(response.text)
-
-def get_creds(file):
-    with open(file, "r") as file:
+def get_creds(file_path):
+    """Retrieve credentials from a YAML file."""
+    with open(file_path, "r") as file:
         data = yaml.safe_load(file)
-        discord_url_logs = data.get("discord_url_logs")[0]
-        pw = data.get("pw")[0]
-        user = data.get("user")[0]
-        return {"discord_url_logs": discord_url_logs, "pw": pw, "user": user} 
+        return {
+            "discord_url_logs": data.get("discord_url_logs")[0],
+            "pw": data.get("pw")[0],
+            "user": data.get("user")[0]
+        }
 
 def pform():
+    """Determine the platform and set the credentials file path accordingly."""
     ps = platform.system()
-    if ps == "Darwin":
-        file = "creds.yaml"
+    file_path = "creds.yaml" if ps == "Darwin" else "/home/ec2-user/tt/creds.yaml"
+    return ps, file_path
+
+# --------- Discord Notifications ---------
+
+def post_discord_message(url, message):
+    """Send a message to a Discord webhook."""
+    discord = Discord(url=url)
+    discord.post(content=message)
+
+# --------- API Session and Data Retrieval ---------
+
+def get_auth_token(user, password):
+    """Authenticate with Tastyworks API and return session token."""
+    url = 'https://api.tastyworks.com/sessions'
+    headers = {'Content-Type': 'application/json'}
+    data = {"login": user, "password": password, "remember-me": True}
+    response = requests.post(url, data=json.dumps(data), headers=headers)
+    response_data = response.json()
+    return response_data['data']['session-token']
+
+def end_session(session_token):
+    """End Tastyworks session."""
+    url = 'https://api.tastyworks.com/sessions'
+    headers = {'Authorization': session_token, 'Content-Type': 'application/json'}
+    response = requests.delete(url, headers=headers)
+    print('Session ended:', response.status_code)
+
+def get_positions(session_token):
+    """Retrieve positions data from Tastyworks API."""
+    url = 'https://api.tastyworks.com/accounts/5WY49300/positions'
+    headers = {'Authorization': session_token, 'Content-Type': 'application/json'}
+    response = requests.get(url, headers=headers)
+    return response.json()
+
+# --------- Database Handling ---------
+
+def connect_to_database(db_path):
+    """Establish a connection to the SQLite database at the specified path."""
+    return sqlite3.connect(db_path)
+
+def save_dataframe_to_table(df, conn, table_name):
+    """Save a pandas DataFrame to a specified table in the database."""
+    df.to_sql(table_name, conn, if_exists='replace', index=False)
+
+def fetch_table_as_dataframe(conn, table_name):
+    """Fetch a specified table from the database as a pandas DataFrame."""
+    return pd.read_sql(f'SELECT * FROM {table_name}', conn)
+
+def get_db_paths():
+    """Determine the platform and set the database paths accordingly."""
+    ps = platform.system()
     if ps == "Linux":
-        file = "/home/ec2-user/tt/creds.yaml"
-    return ps, file
+        return "/home/ec2-user/tt/inventory-fx.db", "/home/ec2-user/tt/masterdata-futures.db"
+    return "inventory-fx.db", "masterdata-futures.db"
+
+# --------- Data Processing ---------
+
+def filter_fx_positions(df):
+    """Filter FX positions from the positions DataFrame."""
+    return df[df['symbol'].str[2] == '6']
+
+def map_symbols_to_streamers(df_fx, df_futures):
+    """Map underlying symbols from FX inventory to streamer symbols."""
+    symbol_to_streamer = dict(zip(df_futures['symbol'], df_futures['streamer-symbol']))
+    df_fx['streamer-symbol'] = df_fx['underlying-symbol'].map(symbol_to_streamer)
+    return df_fx
+
+# --------- Main Position Feed and Database Update ---------
+
+def position_feed():
+    """Retrieve positions, store them in database, and send notification."""
+    ps, file_path = pform()
+    creds = get_creds(file_path)
+    discord_url_logs = creds["discord_url_logs"]
+    
+    session_token = get_auth_token(creds["user"], creds["pw"])
+    positions_data = get_positions(session_token)
+    end_session(session_token)
+    
+    positions_df = pd.DataFrame(positions_data['data']['items'])
+    inventory_db_path, _ = get_db_paths()
+    
+    # Store all positions
+    with connect_to_database(inventory_db_path) as inventory_conn:
+        save_dataframe_to_table(positions_df, inventory_conn, 'positions')
+    
+    # Filter FX positions and store them separately
+    df_fxinventory = filter_fx_positions(positions_df)
+    with connect_to_database(inventory_db_path) as inventory_fx_conn:
+        save_dataframe_to_table(df_fxinventory, inventory_fx_conn, 'fx_positions')
+
+    post_discord_message(discord_url_logs, "Inventory job done")
+    return df_fxinventory
+
+def main():
+    """Main workflow to update FX inventory with additional streamer symbols and save."""
+    inventory_fx_db_path, masterdata_futures_db_path = get_db_paths()
+
+    with connect_to_database(inventory_fx_db_path) as inventory_fx_conn, \
+         connect_to_database(masterdata_futures_db_path) as futures_conn:
+        
+        # Load FX inventory and futures data
+        df_fxinventory = fetch_table_as_dataframe(inventory_fx_conn, 'fx_positions')
+        df_masterfuturesdata = fetch_table_as_dataframe(futures_conn, 'masterdatafutures')
+        
+        # Update FX inventory with streamer symbols
+        df_fxinventory = map_symbols_to_streamers(df_fxinventory, df_masterfuturesdata)
+
+    # --------- Additional Processing: Merging Option Data ---------
+    
+    # Load the fopchain table from the masterdata-fxoptchain.db database
+    ps = platform.system()
+    fopchain_db_path = "masterdata-fxoptchain.db" if ps != "Linux" else "/home/ec2-user/tt/masterdata-fxoptchain.db"
+    with connect_to_database(fopchain_db_path) as conn_fopchain:
+        df_fopchain = fetch_table_as_dataframe(conn_fopchain, 'fxoptchain')
+    
+    # Merge with the FX inventory to get the option-streamer-symbol
+    df_fxinventory = df_fxinventory.merge(
+        df_fopchain[['symbol', 'streamer-symbol', 'strike-price']],
+        on='symbol',
+        how='left',
+        suffixes=('', '_option')
+    )
+
+    # Update the streamer-symbol for minifuture symbols from masterdatafutures
+    minifuture_symbols = df_fxinventory[df_fxinventory['symbol'].str.startswith('/M')]['symbol'].unique()
+    minifuture_streamers = df_masterfuturesdata[df_masterfuturesdata['symbol'].isin(minifuture_symbols)][['symbol', 'streamer-symbol']]
+
+    # Merge to get the streamer-symbol for minifuture symbols
+    df_fxinventory = df_fxinventory.merge(minifuture_streamers, on='symbol', how='left', suffixes=('', '_minifuture'))
+
+    # Update the streamer-symbol column where it is NaN
+    df_fxinventory['streamer-symbol'] = df_fxinventory['streamer-symbol'].combine_first(df_fxinventory['streamer-symbol_minifuture'])
+
+    # Drop the temporary minifuture streamer-symbol column
+    df_fxinventory.drop(columns=['streamer-symbol_minifuture'], inplace=True)
+    
+    # Rename the merged streamer-symbol column to option-streamer-symbol
+    df_fxinventory.rename(columns={'streamer-symbol_option': 'option-streamer-symbol'}, inplace=True)
+    # df_fxinventory.to_clipboard()
+    df_fxinventory = df_fxinventory.sort_values(by='underlying-symbol')
+
+    # --------- Save the enriched FX inventory data ---------
+    with connect_to_database(inventory_fx_db_path) as inventory_fx_conn:
+        save_dataframe_to_table(df_fxinventory, inventory_fx_conn, 'fx_positions')
+        
+    # Output updated results
+    print("Unique underlying symbols:", df_fxinventory['underlying-symbol'].unique().tolist())
 
 if __name__ == '__main__':
-    df_fxinventory = position_feedr()
+    # Run the position feed job
+    position_feed()
+    
+    # Update the FX inventory with additional data
+    main()

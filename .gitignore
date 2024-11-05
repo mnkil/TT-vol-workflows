@@ -32,3 +32,4 @@ node_modules
 ._masterdata-futures.py
 ._masterdata-fxfoptions.py
 ._nav-tracker.py
+*._*

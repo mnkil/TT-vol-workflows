@@ -141,6 +141,7 @@ def main():
     with connect_to_database(fopchain_db_path) as conn_fopchain:
         df_fopchain = fetch_table_as_dataframe(conn_fopchain, 'fxoptchain')
     
+    # df_fopchain.to_clipboard()
     # Merge with the FX inventory to get the option-streamer-symbol
     df_fxinventory = df_fxinventory.merge(
         df_fopchain[['symbol', 'streamer-symbol', 'strike-price']],
@@ -151,9 +152,11 @@ def main():
 
     # Update the streamer-symbol for minifuture symbols from masterdatafutures
     minifuture_symbols = df_fxinventory[df_fxinventory['symbol'].str.startswith('/M')]['symbol'].unique()
-    minifuture_streamers = df_masterfuturesdata[df_masterfuturesdata['symbol'].isin(minifuture_symbols)][['symbol', 'streamer-symbol']]
+    # df_masterfuturesdata.to_clipboard()
+    minifuture_streamers = df_masterfuturesdata[df_masterfuturesdata['symbol'].isin(minifuture_symbols)][['symbol', 'streamer-symbol', 'contract-size']]
 
     # Merge to get the streamer-symbol for minifuture symbols
+    # minifuture_streamers.to_clipboard()
     df_fxinventory = df_fxinventory.merge(minifuture_streamers, on='symbol', how='left', suffixes=('', '_minifuture'))
 
     # Update the streamer-symbol column where it is NaN
@@ -164,8 +167,12 @@ def main():
     
     # Rename the merged streamer-symbol column to option-streamer-symbol
     df_fxinventory.rename(columns={'streamer-symbol_option': 'option-streamer-symbol'}, inplace=True)
-    # df_fxinventory.to_clipboard()
     df_fxinventory = df_fxinventory.sort_values(by='underlying-symbol')
+    # Fill empty contract-size in df_fxinventory using values from df_masterfuturesdata
+    df_fxinventory['contract-size'] = df_fxinventory.apply(
+        lambda row: df_masterfuturesdata[df_masterfuturesdata['symbol'] == row['underlying-symbol']]['contract-size'].values[0]
+        if pd.isna(row['contract-size']) else row['contract-size'], axis=1
+    )
 
     # --------- Save the enriched FX inventory data ---------
     with connect_to_database(inventory_fx_db_path) as inventory_fx_conn:

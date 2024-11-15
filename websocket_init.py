@@ -111,9 +111,6 @@ class TastyworksSession:
 
         # Close session
         status_code, response_text = self.close_session()
-
-        # Send message to Discord (Example usage)
-        self.send_discord_message(f"Session closed with status: {status_code}")
         
         return quote_data
 

@@ -189,6 +189,7 @@ class OptionDataProcessor:
 
         # Step 7: Generate bc_delta summary by CCY
         summary_df = self.summarize_bc_delta_by_ccy()
+        summary_df['total_bc_delta'] = summary_df['total_bc_delta'].apply(lambda x: f"{x:,.0f}")
         self.post_discord_message(self.discord_url_logs, summary_df.to_string(index=False))
 
         return processed_df, summary_df
